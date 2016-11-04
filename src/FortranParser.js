@@ -5,13 +5,13 @@ import Parser from './Parser';
 export default class FortanParser extends Parser {
   constructor() {
     super([
-      {pattern: /\n/gm, fn: (match) => (this.line++, match[0])},
+      {pattern: /;\n/gm, fn: (match) => (this.line++, match[0]), type: 'endofstatement'},
       {pattern: /[ \t]+/gm, skip: true},
       {pattern: /[+\-]?[0-9]+(\.[0-9]+)?([DE]-?[0-9]+)?\b/g, type: 'number'},
       {pattern: /'(([^']|'')*)'/g, type: 'string', fn: (match) => match[1]},
       {pattern: /\.(TRUE|FALSE)\./g, type: 'boolean'},
       /\.(LT|LE|EQ|GT|GE|NE|AND|OR|NOT)\./gi,
-      {pattern: /(SUBROUTINE|IF|RETURN)/gi, fn: (match) => match[0].toUpperCase()},
+      {pattern: /(SUBROUTINE|IF|RETURN|END)/gi, fn: (match) => match[0].toUpperCase()},
       {pattern: /(INTEGER|REAL|DOUBLE[ \t]+PRECISION|COMPLEX|LOGICAL|CHARACTER|PARAMETER)/gi, type: 'type', fn: (match) => match[0].toUpperCase()},
       {pattern: /(DIMENSION|ALLOCATABLE|POINTER|TARGET|EXTERNAL|INTRINSIC)/gi, type: 'attribute', fn: (match) => match[0].toUpperCase()},
       /([*/\-+()=,]|\*\*|::?)/g,
@@ -28,7 +28,7 @@ export default class FortanParser extends Parser {
     let statements = [];
 
     while (this.currentToken !== null) {
-      if (!this.has('\n')) {
+      if (!this.has('endofstatement')) {
         statements.push(this.parseProgramStatement());
       }
     }
@@ -60,10 +60,16 @@ export default class FortanParser extends Parser {
       }
     }
 
-    this.expect('\n');
+    this.expect('endofstatement');
 
     let variables = this.parseVariableDeclarations();
-    return {name, args, variables};
+    let statements = [];
+    //
+    // while (!this.has('END')) {
+    //   statements.push(this.parseStatement());
+    // }
+
+    return {name, args, variables, statements};
   }
 
 
@@ -119,12 +125,12 @@ export default class FortanParser extends Parser {
           variable.dimensions = this.parseArraySpec();
         }
 
-        if (this.currentToken.type !== '\n') {
+        if (this.currentToken.type !== 'endofstatement') {
           this.expect(',');
         }
 
         variables[variable.name] = variable;
-      } while (!this.has('\n'));
+      } while (!this.has('endofstatement'));
 
       return variables;
     }
@@ -188,8 +194,45 @@ export default class FortanParser extends Parser {
       }
     } while (!this.has(')'));
 
-    this.expect('\n');
+    this.expect('endofstatement');
     return constants;
+  }
+
+
+  parseStatement() {
+    if (this.has('if')) {
+      this.expect('(')
+      let expr = this.parseExpression();
+      this.expect(')')
+      let body = this.parseStatement();
+      return {type: 'if', expr, body};
+    }
+  }
+
+
+  parseExpression() {
+    let left = this.parseExpression();
+    let type;
+    let right;
+
+    if (this.has('.AND.')) {
+      type = 'andExpression';
+      right = this.parseExpression2();
+
+    } else if (this.has('.OR.')) {
+      type = 'orExpression';
+      right = this.parseExpression2();
+
+    } else {
+      return left;
+    }
+
+    return {type, left, right};
+  }
+
+
+  parseExpression2() {
+
   }
 
 
